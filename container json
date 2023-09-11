@@ -1,0 +1,47 @@
+[
+  {
+    "image": "DOCKER_IMAGE_URL",
+    "cpu": 512,
+    "memory": null,     
+    "memoryReservation": null,
+    "logConfiguration": {
+      "logDriver": "splunk",
+      "secretOptions": null,
+      "options": {
+        "splunk-url": "https://splunkeshec.es.ad.adp.com",
+        "splunk-sourcetype": "imm-COMPONENT-PROFILE",
+        "splunk-token": "07d41be8-4c19-11e9-95a3-8c85901cc9d9",
+        "splunk-index": "avs_main",
+        "splunk-source": "imm",
+        "splunk-insecureskipverify": "true",
+        "splunk-format" : "raw"
+      }
+    },
+    "portMappings": [
+      {
+        "hostPort": "PORT_NO",
+        "protocol": "tcp",
+        "containerPort": "PORT_NO"
+      }
+    ],
+    "environment": [
+      {
+        "name": "JAVA_TOOL_OPTIONS",
+        "value": "DSPRING_DVALUE"
+      }
+    ],
+    "mountPoints": [
+      {
+        "readOnly": null,
+        "containerPath": "/APP_USER",
+        "sourceVolume": "APP_USER"
+      }
+    ],
+    "dockerLabels": {
+      "Environment": "PROFILE",
+      "Name": "CONTAINER_NAME"
+    },
+    "name": "CONTAINER_NAME",
+    "user": "APP_USER_VALUE"
+  }
+]
