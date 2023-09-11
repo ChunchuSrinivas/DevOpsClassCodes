@@ -1,6 +1,5 @@
 /****
 Script to checkout the application repo, Build , push artifacts to artifactory and deploy on deployment server and sent notifications
-Author: Shaik kalesha
 Stages: CHECKOUT_STAGE: checkout the cicd code base and initialize all the required parameters as well as It will chekcout the UI repo
         NPM_DEPENDENCY_MANAGEMENT_STAGE: Download npm dependent packages to build the code
         BUILD_STAGE:     Build the cloned code and generated the deployable package     
