@@ -1,0 +1,207 @@
+locals {
+  app_profile = "PROFILE"
+}
+locals {
+  local_data = jsondecode(file("aws_ecs_config.json"))
+}
+locals {
+env_app_profile = "${var.app_comp_name}-${local.app_profile}"
+}
+output "cluster" {
+value = local.local_data.container_map["${local.app_profile}"]["${var.app_comp_name}"].cluster_name
+}
+output "service_name" {
+value = local.local_data.container_map["${local.app_profile}"]["${var.app_comp_name}"].service_name
+}
+output "container_name" {
+value = local.local_data.container_map["${local.app_profile}"]["${var.app_comp_name}"].container_name
+}
+output "task_family" {
+value = local.local_data.container_map["${local.app_profile}"]["${var.app_comp_name}"].task_family
+}
+output "target_group" {
+value = local.local_data.container_map["${local.app_profile}"]["${var.app_comp_name}"].target_group
+}
+output "show_rules" {
+value = local.local_data.container_map["${local.app_profile}"]["${var.app_comp_name}"].listener_rule
+}
+output "show_host" {
+value = local.local_data.container_map["${local.app_profile}"]["${var.app_comp_name}"].host
+}
+output "show_sg" {
+value = local.local_data.container_map["${local.app_profile}"]["${var.app_comp_name}"].sg_group
+}
+output "show_subnet" {
+value = local.local_data.container_map["${local.app_profile}"]["${var.app_comp_name}"].sb_nets
+}
+output "show_efs" {
+value = local.local_data.container_map["${local.app_profile}"]["${var.app_comp_name}"].efs_volume
+}
+
+/*
+output "vpc_id" {
+  value = local.local_data.container_map["${local.app_profile}"]["${var.app_comp_name}"].vpc_id
+}
+*/
+
+output "app_user" {
+  value = local.local_data.container_map["${local.app_profile}"]["${var.app_comp_name}"].app_user
+}
+output "app_user_value"{
+  value = local.local_data.container_map["${local.app_profile}"]["${var.app_comp_name}"].app_user_value
+}
+
+data "aws_caller_identity" "current" {
+}
+
+locals {
+    account_id = data.aws_caller_identity.current.account_id
+}
+
+output "account_id" {
+  value = local.account_id  
+}
+
+/*
+variable "vpc_id" {}
+
+data "aws_vpc" "selected" {
+  id = var.vpc_id
+}
+output "vpc_id" {
+  value = data.aws_vpc.selected.id 
+}
+*/
+
+locals {
+app_ecs_cluster_name   = "${var.app_grp_name}-${local.env_app_profile}-cluster"
+app_ecs_service_name   = "${var.app_grp_name}-${local.env_app_profile}-service"
+app_ecs_container_name = "${var.app_grp_name}-${local.env_app_profile}-container"
+app_ecs_task_family    = "${var.app_grp_name}-${local.env_app_profile}-task"
+app_ecs_target_group   = "${var.app_grp_name}-${local.env_app_profile}-tg"
+}
+
+resource "aws_ecs_cluster" "app_ecs_cluster" {
+    name = local.app_ecs_cluster_name
+    capacity_providers  = ["FARGATE"]
+    setting {
+        name= "containerInsights"
+        value= var.container_insights_flag
+    }
+    tags = {
+      Name          = local.app_ecs_cluster_name
+      CostCenter    = "mm" 
+      BusinessUnit  = "CoSo-EFS" 
+      Tier          = "middleware"  
+      Profile       = local.app_profile
+    }
+}
+
+resource "aws_ecs_service" "app_ecs_service" {
+  	name            = local.app_ecs_service_name
+	  launch_type		  = "FARGATE"
+  	cluster         = aws_ecs_cluster.app_ecs_cluster.id
+  	task_definition = aws_ecs_task_definition.app_ecs_task_def.arn
+  	desired_count   = "TASK_DESIRED_COUNT"
+	network_configuration{
+		subnets          	= local.local_data.container_map["${local.app_profile}"]["${var.app_comp_name}"].sb_nets
+		security_groups 	= local.local_data.container_map["${local.app_profile}"]["${var.app_comp_name}"].sg_group
+		assign_public_ip 	= "false"
+	}
+  load_balancer {
+    target_group_arn = aws_lb_target_group.app_elb_ip_based_tg.arn
+    container_name   = local.app_ecs_container_name
+    container_port   = "PORT"
+  }  
+  tags = {
+    Name          = local.app_ecs_service_name
+    CostCenter    = "mm" 
+    BusinessUnit  = "CoSo-EFS" 
+    Tier          = "middleware"  
+    Profile       = local.app_profile
+  }
+}
+
+resource "aws_ecs_task_definition" "app_ecs_task_def" {
+  family                   = local.app_ecs_task_family
+  execution_role_arn       = "arn:aws:iam::856768456474:role/ecsTaskExecutionRole"
+  task_role_arn            = "arn:aws:iam::856768456474:role/ecsTaskExecutionRole" 
+  network_mode             = "awsvpc"
+  requires_compatibilities = ["FARGATE"]
+  memory                   = "MEMORY"
+  cpu                      = "CPU"
+  container_definitions = file("containers-def.json")
+  volume {
+      name = local.local_data.container_map["${local.app_profile}"]["${var.app_comp_name}"].app_user
+      efs_volume_configuration  {
+         file_system_id = local.local_data.container_map["${local.app_profile}"]["${var.app_comp_name}"].efs_volume 
+         root_directory = local.local_data.container_map["${local.app_profile}"]["${var.app_comp_name}"].root_directory
+      }
+  }
+  tags = {
+    Name          = local.app_ecs_task_family
+    CostCenter    = "mm" 
+    BusinessUnit  = "CoSo-EFS" 
+    Tier          = "middleware"  
+    Profile       = local.app_profile
+  }
+}
+
+resource "aws_lb_target_group" "app_elb_ip_based_tg" {
+  name        = local.app_ecs_target_group
+  port        = 80
+  protocol    = "HTTP"
+  target_type = "ip"
+  vpc_id      = "VPC"
+
+    health_check {
+    path                = "/imm/${var.app_context_path}/healthcheck"
+    protocol            = "HTTP"
+    matcher             = "200"
+    interval            = 30
+    timeout             = 5
+    unhealthy_threshold = "5"
+    healthy_threshold   = "5"
+  }
+    tags = {
+    Name          = local.app_ecs_target_group
+    CostCenter    = "mm" 
+    BusinessUnit  = "CoSo-EFS" 
+    Tier          = "middleware"  
+    Profile       = local.app_profile
+  }
+}
+
+resource "aws_lb_listener_rule" "rule_to_map_alb_n_tg" {
+  listener_arn       = "arn:aws:elasticloadbalancing:ca-central-1:856768456474:listener/app/imm-dev-lb/157b04ce97c03f77/c454c86d76fd3683"
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.app_elb_ip_based_tg.arn
+  }  
+  condition {
+    path_pattern {
+      values = ["/imm/${var.app_context_path}/**"]
+    }
+  }
+  condition {
+    host_header {
+      values = ["${local.local_data.container_map["${local.app_profile}"]["${var.app_comp_name}"].host}"]
+    }
+  }
+}
+
+/*
+resource "aws_lb_listener" "https_listener" {
+  load_balancer_arn = "arn:aws:elasticloadbalancing:ca-central-1:856768456474:loadbalancer/app/imm-dev-lb/157b04ce97c03f77"
+  port              = "443"
+  protocol          = "HTTPS"
+  ssl_policy        = "ELBSecurityPolicy-2016-08"
+  certificate_arn   = "arn:aws:acm:ca-central-1:856768456474:certificate/da873229-75be-46e7-bc97-72f077e6be48"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.app_elb_ip_based_tg.arn
+  }
+}
+*/
