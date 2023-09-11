@@ -1,0 +1,130 @@
+#!/bin/ksh
+#
+# +======================================================================+
+# |       COPYRIGHT (c) 2010 ADP Canada, Financial Systems               |
+# +======================================================================+
+# |                                                                      |
+# | Module      : xxmm_install.conf                                      |
+# |                                                                      | 
+# | Purpose     : Config file for Installation Scripts                   |
+# |                                                                      |
+# | Note        : This config file is essentially a script. Hence care   |
+# |               must be taken when modifying this file for different   | 
+# |               configurations.                                        | 
+# |                                                                      | 
+# | Author      : Ambikesh Pagare                                        |
+# | Date        : 21-JUN-2022                                            |
+# | Version     : 1.1                                                    |
+# |                                                                      |
+# +----------------------------------------------------------------------+
+# |                         CHANGE HISTORY                               |
+# +----------------------------------------------------------------------+
+# |   Date    |    Author      |  SCR   | Remarks                        |
+# +----------------------------------------------------------------------+
+# | 21-JUN-2022   Ambikesh       CICD    Added config for build script   |
+# |                                      BitBucket Server & access token |
+# |                                                                      |
+# +======================================================================+
+#
+
+# Base Installation Directory where the Installation Packages
+# are created. Put it in double quotes always
+BASE_INSTALL_DIR="$XXMM_TOP/install"
+
+# Configure the BitBucket Server
+BITSERVER="https://bitbucket.es.ad.adp.com/projects/IMMS/repos"
+
+# BitBucket server access token
+BBtoken="MDk2NjA4MjgxNTI2OkKudn52FIPohkEA7quvLVi9NCtk"
+
+# We put this in single quotes
+# to ensure that the variable is not expanded
+FORMDIR='$XXMM_TOP/forms/US'
+
+# File extensions for the sub-directories ( components )
+# Each directory will have components with specific extensions
+# Each directory must be singular form not plural and could be 
+# created in lower or UPPER case, lower cases are recommended
+# Those directories must be defined as variable (UPPERCASES only) here
+# And the applicable extensions must be assigned separated by space
+# eg DIR='ext EXT'
+# There MUST NOT be any additional spaces at beggining, in between or at the end.
+
+# Allowed extensions for the table creation scripts
+# BitBucket DIR: XXMM_TOP/install/apps/table
+TABLE='tab TAB tbl TBL sql SQL'
+
+# Allowed extensions for the View creation scripts
+# BitBucket DIR: XXMM_TOP/install/apps/view
+VIEW='vw VW sql SQL'
+
+# Allowed extensions for the Sequence creation scripts
+# BitBucket DIR: XXMM_TOP/install/apps/sequence
+SEQUENCE='seq SEQ sql SQL'
+
+# Allowed extensions for the Synonym creation scripts
+# BitBucket DIR: XXMM_TOP/install/apps/synonym
+SYNONYM='syn SYN sql SQL'
+
+# Allowed extensions for the Index creation scripts
+# BitBucket DIR: XXMM_TOP/install/apps/index
+INDEX='idx IDX sql SQL'
+
+# Allowed extensions for the Package Spec PL/SQL scripts
+# BitBucket DIR: XXMM_TOP/install/apps/package spec
+# BitBucket DIR: XXMM_TOP/install/apps/table handler spec
+PACKAGE_SPEC='pks PKS sql SQL'
+
+# Allowed extensions for the Package Body PL/SQL scripts
+# BitBucket DIR: XXMM_TOP/install/apps/package body
+# BitBucket DIR: XXMM_TOP/install/apps/table handler body
+PACKAGE_BODY='pkb PKB sql SQL'
+
+# Allowed extensions for the Misc SQL scripts
+# BitBucket DIR: XXMM_TOP/install/apps/MISC_SQL
+MISC_SQL='sql SQL'
+
+
+# Allowed extensions for the Triggers
+# BitBucket DIR: XXMM_TOP/install/apps/trigger
+TRIGGER='tri TRI trg TRG sql SQL'
+
+# Allowed extensions for the FNDLOAD shell scripts
+# BitBucket DIR: XXMM_TOP/install/apps/fndload
+FNDLOAD='sh SH'
+
+# Allowed extensions for the BIP Definition shell scripts
+# BitBucket DIR: XXMM_TOP/reports/BIP/data Definitions
+BIP_DEF='sh SH'
+
+# Allowed extensions for the BIP Template shell scripts
+# BitBucket DIR: XXMM_TOP/reports/BIP/Templates
+BIP_TMPL='sh SH'
+
+
+# Allowed extensions for the Oracle Forms
+# BitBucket DIR: XXMM_TOP/forms/US
+FORM='fmb FMB'
+
+# Allowed extensions for the Oracle PLL libraries
+# BitBucket DIR: AU_TOP/resource
+PLL='pll PLX'
+
+# Allowed extensions for the SHL Directory
+# BitBucket DIR: XXMM_TOP/shl
+SHL='sh SH shl SHL'
+
+# Allowed extensions for the SHL Directory
+# BitBucket DIR: XXMM_TOP/shl
+CONFIG='xml XML xsl XSL conf CONF lct LCT'
+
+# Allowed extensions for the BIN Directory
+# BitBucket DIR: XXMM_TOP/bin
+BIN='prog PROG'
+
+
+# Allowed extensions for the Oracle*Reports
+# BitBucket DIR: XXMM_TOP/reports/US
+REPORT='rdf RDF'
+ 
+# We're done!
