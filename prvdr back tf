@@ -1,0 +1,14 @@
+provider "aws" {
+  region                  = "ca-central-1"
+  shared_credentials_file = "./.aws/credentials"
+  profile                 = "saml"
+}
+
+terraform {
+  backend "s3" {
+    bucket = "imm-terraform-backend"
+    key    = "TF_STATE_FILE" 
+    region = "ca-central-1"
+    profile = "saml"
+  }
+}
