@@ -1,0 +1,401 @@
+/****
+Script to checkout the application repo, Build , push artifacts to artifactory and deploy on deployment server and sent notifications
+Author: Shaik kalesha
+Stages: CHECKOUT_STAGE: checkout the cicd code base and initialize all the required parameters as well as It will chekcout the UI repo
+        NPM_DEPENDENCY_MANAGEMENT_STAGE: Download npm dependent packages to build the code
+        BUILD_STAGE:     Build the cloned code and generated the deployable package     
+        UPLOAD_ARTIFACT_TO_ARTIFACTORY: Upload the artifacts from the slave node to Jfrog artifactory
+        APPROVE_STAGE: Approval Process to deploy
+        DEPLOY_STAGE: Deploy war on servers
+        EmailNotification: Notifications
+Methods:executeAngularCICD():   This is the main method of the pipeline execution start from this method
+        init():                 Initialization of all the stages as well as all the properties
+        getRepoNameFromURL():   Get repository name from the repo URL
+        getBuildUserInfo():     Get user information from the build
+		    sendEmailNotification(plMap): Send the notifications 
+        deleteDir():            After execution of the pipeline it will delete the repo's from Node
+
+****/
+node("IMMS_Deployment"){
+    def plMap = [:];
+    try{
+        //Main method in pipeline execution start's from this method
+        executeAngularCICD(plMap);
+    }
+    catch(ex){
+        throw ex;
+    }
+    finally{
+        //delete all the workspace after the job completion
+        deleteDir();
+    }
+}
+
+//Get application/component name from repo url
+def getRepoNameFromURL(def gitURL){
+    return gitURL.replace(".git","").split("/")[-1];
+}
+
+//Initialinzation of all the stages and loading all the properties file
+def init(plMap){
+    plMap.userInfo =	getBuildUserInfo();
+    plMap.CHECKOUT_STAGE = "CheckOut";
+    plMap.CODE_ANALYSIS_STAGE = "CodeAnalysis";
+    plMap.NPM_DEPENDENCY_MANAGEMENT_STAGE = "NPMDependencyManagement";
+    plMap.UPLOAD_ARTIFACT_TO_ARTIFACTORY = "UploadArtifactToArtifactory";//upload package artifactory changes
+    plMap.BUILD_STAGE = "Build";
+    plMap.APPROVE_STAGE = "Approve Stage"
+    plMap.DEPLOY_STAGE = "Deploy";
+    plMap.MERGE_TO_DEVELOP = "MergeToDevelop";
+    plMap.EMAIL_NOTIFICATION_STAGE = "EmailNotification";
+    plMap.NOT_STARTED = "Not Started";
+    plMap.SUCCESS = "SUCCESS";
+    plMap.FAILURE = "FAILURE";
+    plMap.UNSTABLE = "ABORTED";
+    plMap.stagesStatusMap = [:];
+    plMap.stagesStatusMap.put(plMap.CHECKOUT_STAGE,plMap.NOT_STARTED);
+    plMap.stagesStatusMap.put(plMap.CODE_ANALYSIS_STAGE,plMap.NOT_STARTED);
+    plMap.stagesStatusMap.put(plMap.NPM_DEPENDENCY_MANAGEMENT_STAGE,plMap.NOT_STARTED);
+    plMap.stagesStatusMap.put(plMap.BUILD_STAGE,plMap.NOT_STARTED);
+    plMap.stagesStatusMap.put(plMap.UPLOAD_ARTIFACT_TO_ARTIFACTORY,plMap.NOT_STARTED);//upload package artifactory changes
+    plMap.stagesStatusMap.put(plMap.DEPLOY_STAGE,plMap.NOT_STARTED);
+
+    println "Initializing all folder properties";
+    //reading-getting all the environment properties
+	withFolderProperties{
+		env.CONFIG_REPO_URL =  env.CONFIG_REPO_URL;
+		env.GIT_CRED_ID = env.GIT_CRED_ID;
+		env.SONAR_HOST_URL = env.SONAR_HOST_URL;
+        //plMap.component = plMap.component;
+        //plMap.profile = plMap.profile;
+	}
+}
+
+def executeAngularCICD(plMap){
+        def branchMap= [:]; 
+        init(plMap);
+        plMap.configRepoURL =  env.CONFIG_REPO_URL;
+        //plMap.profile = plMap.profile;
+        plMap.configRepoName = getRepoNameFromURL(plMap.configRepoURL);
+		println "configuration from Config Repo: ${plMap.configRepoName}";
+    
+        plMap.branchname= "${BranchName}"
+        println ("BranchName: ${BranchName}") 
+        
+        plMap.profile = "${PROFILE}"
+        println ("Profile: ${PROFILE}")
+        
+        plMap.component = "${Application}"
+        println("ApplicationName: ${Application}")
+
+        try{
+            //checking out CICD code as well as application repo's
+        stage(plMap.CHECKOUT_STAGE){
+			plMap.stagesStatusMap.put(plMap.CHECKOUT_STAGE,plMap.FAILURE);
+			bat "git clone -b feature/clustersnamechange --single-branch https://bitbucket.es.ad.adp.com/scm/imms/${plMap.configRepoName}.git";
+			bat "dir";
+            //loading all the properties files like shared properties, branch properties and pipeline properties
+			plMap.commonProperties = readProperties file: 
+			"${plMap.configRepoName}\\common\\config\\shared.properties";
+			plMap.branchProperties = readProperties file: 
+			"${plMap.configRepoName}\\dev\\${plMap.profile}\\${plMap.component}\\config\\branch.properties";
+			plMap.pipelineProperties = readProperties file: 
+			"${plMap.configRepoName}\\dev\\${plMap.profile}\\${plMap.component}\\config\\pipeline.properties";
+            println plMap.commonProperties
+			println plMap.branchProperties;
+			println plMap.pipelineProperties;
+            plMap.pscpPath = plMap.commonProperties.PSCP_PATH;
+            plMap.branchname= "${BranchName}"
+            branchMap.branch= "${BranchName}".split("/");
+            plMap.releaseVersion  = "${branchMap.branch[1]}"
+            println("branchMap::${branchMap.branch}")
+            println("release::${branchMap.branch[0]}")
+            println("releaseversion::${branchMap.branch[1]}")
+            //plMap.releaseVersion  =   "${plMap.branchProperties.MAJOR_VERSION}.${plMap.branchProperties.MINOR_VERSION}.${plMap.branchProperties.PATCH_VERSION}";
+			
+            //plMap.branchProperties.BranchName  =  "${plMap.branchProperties.BranchName_PREFIX}${plMap.releaseVersion}";
+			//plMap.repoBranchName = plMap.branchProperties.BranchName;
+            plMap.repoBranchName = plMap.branchname;
+            //Email initialization starts here
+			plMap.emailToList    =  "${plMap.branchProperties.EMAIL_TO_APP_TEAM}${plMap.commonProperties.EMAIL_TO_AUTOMATION}${plMap.commonProperties.EMAIL_TO_DEVOPS}";
+            //Email initialization ends here
+			plMap.repoURL         =   plMap.branchProperties.REPO_URL;
+			plMap.repoName        =   getRepoNameFromURL(plMap.repoURL);
+            plMap.releaseBuildNo  =  "${plMap.releaseVersion}.${currentBuild.number}";
+            currentBuild.displayName = "${plMap.releaseVersion}.${currentBuild.displayName.replace("#","")}";
+            //currentBuild.displayName = currentBuild.displayName.replace("#","");
+			//currentBuild.displayName = "#${plMap.branchProperties.MAJOR_VERSION}.${plMap.branchProperties.MINOR_VERSION}.${plMap.branchProperties.PATCH_VERSION}.${currentBuild.displayName}";
+
+            plMap.npmStageExists = plMap.pipelineProperties.NPM_DEPENDENCY_MANAGEMENT_STAGE.trim();
+            plMap.codeAnalysisStageExists = plMap.pipelineProperties.CODE_ANALYSIS_STAGE.trim();
+            plMap.sshUserName    = plMap.pipelineProperties.SSH_USER_NAME;
+            plMap.sshPassword    = plMap.pipelineProperties.SSH_PASSWORD;
+
+            plMap.artifactoryServerURL = plMap.commonProperties.ARTIFACTORY_SERVER_URL;//upload package artifactory changes
+
+            plMap.targetServers  = plMap.pipelineProperties.TARGET_SERVERS.trim().split(";");
+            plMap.tomcatInstance = plMap.pipelineProperties.TOMCAT_INSTANCE;
+
+			manager.addShortText("Triggered by : ${plMap.userInfo}");
+			manager.addShortText("branch : ${plMap.repoBranchName}");
+		    
+            bat "git clone -b ${plMap.repoBranchName} --single-branch https://bitbucket.es.ad.adp.com/scm/imms/${plMap.repoName}.git";
+
+			dir(plMap.repoName){
+//			git branch: plMap.repoBranchName, credentialsId: "${env.GIT_CRED_ID}",
+//			url: plMap.repoURL;
+                // tagging starts here
+                def tag = "v${plMap.releaseVersion}.${currentBuild.number}";
+			    bat "git tag ${tag}";
+			    //bat "git push origin ${tag}";
+                //tagging ends here
+            bat "del .gitignore";
+			}
+
+			plMap.stagesStatusMap.put(plMap.CHECKOUT_STAGE,plMap.SUCCESS);
+			  
+		} 
+
+		//download the npm dependencies to build the code
+		stage(plMap.NPM_DEPENDENCY_MANAGEMENT_STAGE){
+			if(plMap.npmStageExists=="true"){
+				plMap.stagesStatusMap.put(plMap.NPM_DEPENDENCY_MANAGEMENT_STAGE,plMap.FAILURE);
+				dir(plMap.repoName){
+					bat "npm install";
+					bat "git status -uall";
+					plMap.stagesStatusMap.put(plMap.NPM_DEPENDENCY_MANAGEMENT_STAGE,plMap.SUCCESS);
+				} 
+			}
+			}
+			
+		stage(plMap.CODE_ANALYSIS_STAGE){
+            if(plMap.codeAnalysisStageExists=="true"){
+			    plMap.stagesStatusMap.put(plMap.CODE_ANALYSIS_STAGE,plMap.FAILURE);
+			    dir(plMap.repoName){  
+				    bat "npm install sonar-scanner --save-dev";
+				    bat "npm run sonar";
+			    }
+			    plMap.stagesStatusMap.put(plMap.CODE_ANALYSIS_STAGE,plMap.SUCCESS);
+            }
+		}
+        //Build the cloned code and generate the build package
+        //This stage integrate the code,  build the code and generate the package/artifact
+		stage(plMap.BUILD_STAGE){
+			plMap.stagesStatusMap.put(plMap.BUILD_STAGE,plMap.FAILURE);
+			dir(plMap.repoName){  
+				//bat "npm install -g @angular/cli";
+				bat "npm run updateBuild -- v${plMap.releaseVersion}";
+				bat "ng build --prod --deploy-url /launchapp/ui-files/ --base-href /launchapp/";
+				bat "git status -uall";
+
+                //upload package artifactory changes start
+                bat "cd dist"
+                plMap.sourceArtifactName = "imms-${plMap.component}-${plMap.releaseVersion}.${currentBuild.number}";
+                plMap.targetArtifactName = plMap.sourceArtifactName;
+                
+                bat "mkdir ${plMap.targetArtifactName}"
+                bat "xcopy dist\\imms-angular-ui  ${plMap.targetArtifactName}\\ /E"
+                println("${plMap.targetArtifactName}")
+                
+                bat "tar zcpf ${plMap.targetArtifactName}.tgz ${plMap.targetArtifactName}"
+                
+                println("plMap.sourceArtifactName:::${plMap.sourceArtifactName}")
+			}
+			plMap.stagesStatusMap.put(plMap.BUILD_STAGE,plMap.SUCCESS);
+
+		}
+
+        // Upload generated package to the artifactory
+        stage(plMap.UPLOAD_ARTIFACT_TO_ARTIFACTORY) {
+            plMap.stagesStatusMap.put(plMap.UPLOAD_ARTIFACT_TO_ARTIFACTORY, plMap.FAILURE)
+            dir("${plMap.repoName}") {
+            bat "dir"
+            
+            println("inside uploadstage")
+            plMap.artifactoryArtifactName =  "${plMap.targetArtifactName}";
+            
+            println("${plMap.artifactoryArtifactName}")
+            plMap.artifactoryRelativePath= "imm-npm-local/com/adp/imm/imms-${plMap.component}/";
+     
+            bat "curl -u  imm_cicddev:ReleaseEngineering@123 -X PUT \"${plMap.artifactoryServerURL}/artifactory/${plMap.artifactoryRelativePath}\" -T ${plMap.targetArtifactName}.tgz"
+  
+            }
+            plMap.stagesStatusMap.put(plMap.UPLOAD_ARTIFACT_TO_ARTIFACTORY, plMap.SUCCESS)
+            //input "You want to proceed to deploy"   
+        }
+        //upload package artifactory changes end
+
+        //approval process to approve the deployment
+        stage(plMap.APPROVE_STAGE){
+	        plMap.stagesStatusMap.put(plMap.APPROVE_STAGE,plMap.FAILURE);
+	        println "Job will get cancelled automatically, If there is no response from approver within 120 seconds"
+                timeout(time: 120, unit: 'SECONDS'){               
+                    def userInput = input id: 'userInput',
+                        message: "Lets promote - ${plMap.component}-${plMap.profile}-${plMap.releaseVersion}", 
+                        submitterParameter: 'submitter',
+                        submitter: ' '     
+                        plMap.stagesStatusMap.put(plMap.APPROVE_STAGE,plMap.SUCCESS);
+                }
+        }
+
+        //deploy the build packages on application server 
+		stage(plMap.DEPLOY_STAGE){
+			plMap.stagesStatusMap.put(plMap.DEPLOY_STAGE,plMap.FAILURE);
+			  dir(plMap.repoName){
+                  for(def targetServer : plMap.targetServers){
+				// deployment in only nonrestricted
+				    bat """${plMap.pscpPath} -pw ${plMap.sshPassword}  -r \"dist\\imms-angular-ui\\*\" ${plMap.sshUserName}@${targetServer}:/app/${plMap.tomcatInstance}/webapps/launchapp/ui-files/""";
+				    bat """${plMap.pscpPath} -pw ${plMap.sshPassword}  -r \"dist\\imms-angular-ui\\index.html\" ${plMap.sshUserName}@${targetServer}:/app/${plMap.tomcatInstance}/webapps/launchapp/""";
+                }
+			  }
+			plMap.stagesStatusMap.put(plMap.DEPLOY_STAGE,plMap.SUCCESS);
+		}
+
+        stage(plMap.MERGE_TO_DEVELOP){
+			    plMap.stagesStatusMap.put(plMap.MERGE_TO_DEVELOP,plMap.FAILURE);
+                try{
+			    dir(plMap.repoName){  
+				    bat "git checkout develop";
+                    bat "git merge ${plMap.repoBranchName}";
+                    //bat "git push origin develop";
+			    }
+                plMap.stagesStatusMap.put(plMap.MERGE_TO_DEVELOP,plMap.SUCCESS);
+                }
+                catch(ex){
+                println "********** Merge to Develop FAILED ************************";
+                }
+		}
+    }
+    catch(ex){
+        println "Pipeline failed, please check the logs below";
+      	println "Ongoing Job Build Status :${currentBuild.result}";
+      	println "Ongoing Job Build Status :${currentBuild.currentResult}";
+        //to set the build status in case of plMap.FAILURE
+      if(currentBuild.currentResult=="UNSTABLE"){
+        currentBuild.result = plMap.UNSTABLE;
+        throw ex;
+      }else{
+      	currentBuild.result = plMap.FAILURE;
+        throw ex;
+      }
+    }
+	finally{
+	   stage(plMap.EMAIL_NOTIFICATION_STAGE){
+	    println "Sending email to : ${plMap.emailToList}";
+		sendEmailNotification(plMap);
+	   }
+	}
+}
+
+def sendEmailNotification(plMap){
+	emailext body: getEmailBody(plMap), 
+	recipientProviders: [developers()],
+	subject: "CICD ${plMap.component}-${plMap.profile} Deployment ${currentBuild.displayName}-${currentBuild.currentResult}", 
+	 to: plMap.emailToList,
+	 attachLog: true;
+}
+
+def getEmailBody(plMap){
+            for(def stage: plMap.stagesStatusMap.keySet()){
+            println "${stage} : ${plMap.stagesStatusMap.get(stage)}";
+            }
+   def emailBody =  """
+<html>
+<head>
+<style>
+body{
+    background-color:#fdfcf6 !important;
+    color: #ebebeb !important;
+}
+table {
+  width:100%;
+}
+table td {
+    border: 0.3px solid #ebebeb;
+    border-collapse: collapse;
+    background-color: #897cb3;
+    color: #ffffff;
+    padding: 8px;
+    text-align: left;
+}
+
+
+table th {
+    border: 0.2px solid #ebebeb;
+    border-collapse: collapse;
+    background-color: #efdfd0;
+    color: #121c4e;
+    padding: 15px;
+    text-align: left;
+}
+
+h1, h2, h3, h4, h5, h6{
+    background-color:gray;
+    color: #ffffff;
+}
+a:link, a:visited {
+  background-color: #f44336;
+  color: white;
+  padding: 14px 25px;
+  text-align: center;
+  text-decoration: none;
+  display: inline-block;
+}
+
+a:hover, a:active {
+  background-color: #3ebede;
+}
+</style>
+</head>
+<body>
+<div>
+
+<div style="float:left !important;width:50% !important">
+<h3>Job Build Status : ${currentBuild.currentResult}</h3>
+<h3>Triggered by : ${userInfo} </h3>
+<h4>Execution time : ${currentBuild.durationString.replace("and counting","")} </h4>
+<h4>Branch : ${plMap.branchProperties.BranchName}</h4>
+<a href="${currentBuild.absoluteUrl}"><h5>Jenkins Build URL</h5></a>
+<a href="${env.SONAR_HOST_URL}:9000/dashboard?id=imms-ui"><h5>Code Analysis URL</h5></a>
+</div>
+
+<div >
+<table>
+<tr><th>Stage</th><th>Result</th></tr>""";
+
+for(def stage: plMap.stagesStatusMap.keySet()){
+    emailBody+= """<tr><td>${stage}</td><td>${plMap.stagesStatusMap.get(stage)}</td></tr>""";
+}
+emailBody+= """
+</table>
+</div>
+
+
+</div>
+</body>
+</html>
+""";
+return emailBody;
+}
+
+
+def getBuildUserInfo(){
+    // plMap.userInfo="";
+    emailId ="";
+    userId ="";
+    try{
+    wrap([$class: 'BuildUser']) {
+        emailId = BUILD_USER_EMAIL;
+        userId = BUILD_USER_ID;
+        if(null==emailId || null==userId ||  emailId.trim().length()==0)
+        emailId = "AutoTrigger";
+        BUILD_USER_EMAIL = emailId;
+    }
+    }
+    catch(ex){
+        userInfo = "AutoTrigger";
+        return userInfo;
+    }
+  userInfo = "${userId} - ${emailId}";
+  return userInfo;
+}
