@@ -1,0 +1,424 @@
+/****
+Script to checkout the application repo, Build , push artifacts/image to artifactory and deploy on deployment server and sent notifications
+Stages: CHECKOUT_STAGE: checkout the cicd code base and initialize all the required parameters as well as It will chekcout the UI repo
+        BUILD_STAGE:    Build the code from the branch and generate the docker image as output
+        UPLOAD_ARTIFACT_TO_ARTIFACTORY: Upload the artifacts from the slave node to Jfrog artifactory
+        APPROVE_STAGE: Approval process
+	DEPLOY_STAGE: Deploy image on ECS with the help of terraform scripts
+        EmailNotification: Notifications
+Methods:executeAngularCICD():   This is the main method of the pipeline execution start from this method
+        init():                 Initialization of all the stages as well as all the properties
+        getRepoNameFromURL():   Get repository name from the repo URL
+        getBuildUserInfo():     Get user information from the build
+		sendEmailNotification(plMap): Send the notifications 
+        deleteDir():            After execution of the pipeline it will delete the repo's from Node
+
+****/
+node("linux-mvn-docker-slave8"){
+    def plMap = [:];
+    def PROFILE = "{PROFILE}".toLowerCase();
+    init(plMap);
+    dir("/tmp/jen_ws/cd/${env.ENV_NAME}/${env.PROFILE}"){
+        try{
+            //Main method in pipeline execution start's from this method
+            executeJavaCICD(plMap);
+        }
+        catch(ex){
+            throw ex;
+        }
+        finally{
+            //delete all the workspace after the job completion
+            deleteDir();
+        }
+    }
+}
+
+//Get application/component name from repo url
+def getRepoNameFromURL(def gitURL){
+    return gitURL.replace(".git","").split("/")[-1];
+}
+
+//Initialinzation of all the stages and loading all the properties file
+def init(plMap){
+    plMap.userInfo =	getBuildUserInfo();
+    plMap.CHECKOUT_STAGE = "CheckOut";
+    plMap.BUILD_STAGE = "Build";
+    plMap.CODE_ANALYSIS_STAGE = "CodeAnalysis";
+    plMap.APPROVE_STAGE = "Approval Stage";
+    plMap.ECS_DEPLOYMENT = "ECS Deployment";
+    plMap.MERGE_TO_DEVELOP = "MergeToDevelop";
+    plMap.EMAIL_NOTIFICATION_STAGE = "EmailNotification";
+    plMap.NOT_STARTED = "Not Started";
+    plMap.SUCCESS = "SUCCESS";
+    plMap.FAILURE = "FAILURE";
+  	plMap.UNSTABLE = "ABORTED";
+    plMap.stagesStatusMap = [:];
+    plMap.stagesStatusMap.put(plMap.CHECKOUT_STAGE,plMap.NOT_STARTED);
+	plMap.stagesStatusMap.put(plMap.CODE_ANALYSIS_STAGE,plMap.NOT_STARTED);
+    plMap.stagesStatusMap.put(plMap.BUILD_STAGE,plMap.NOT_STARTED);
+    plMap.stagesStatusMap.put(plMap.ECS_DEPLOYMENT,plMap.NOT_STARTED);
+
+    println "Initializing all folder properties";
+    //reading-getting all the environment properties
+	withFolderProperties{
+		env.CONFIG_REPO_URL =  env.CONFIG_REPO_URL;
+		env.GIT_CRED_ID = env.GIT_CRED_ID;
+		env.SONAR_HOST_URL = env.SONAR_HOST_URL;
+        //plMap.componentname = plMap.componentname;
+        env.ENV_NAME = env.ENV_NAME;
+        env.CICD_BRANCH_NAME = env.CICD_BRANCH_NAME;
+        //env.PROFILE = env.PROFILE;
+        if(env.MVN_OPTIONS){
+            env.MVN_OPTIONS == env.MVN_OPTIONS;
+        }
+        else{
+            env.MVN_OPTIONS = "";
+        }
+	}
+}
+
+def executeJavaCICD(plMap){
+        def branchMap= [:]; 
+        plMap.configRepoURL =  env.CONFIG_REPO_URL;
+        //plMap.profile = env.PROFILE;
+        //plMap.component = plMap.componentname;
+        plMap.configRepoName = getRepoNameFromURL(plMap.configRepoURL);
+        if(env.CICD_BRANCH_NAME == null || env.CICD_BRANCH_NAME.trim()==""){
+            env.CICD_BRANCH_NAME = "feature/clusters-name-change";
+        }
+        plMap.configBranchName = env.CICD_BRANCH_NAME;
+		println "configuration from Config Repo: ${plMap.configRepoName}";  
+        try{
+        //checking out CICD code as well as application repo's
+        stage(plMap.CHECKOUT_STAGE){
+			plMap.stagesStatusMap.put(plMap.CHECKOUT_STAGE,plMap.FAILURE);
+            println "Current directory : ";
+            sh "pwd";
+			sh "git clone -b feature/clusters-name-change --single-branch ssh://git@bitbucket.es.ad.adp.com:7999/imms/${plMap.configRepoName}.git";
+			sh "ls -ltr";
+            //loading all the properties files like shared properties, branch properties and pipeline properties
+			plMap.commonProperties = readProperties file: 
+			"${plMap.configRepoName}\\common\\config\\shared.properties";
+			plMap.branchProperties = readProperties file: 
+            "${plMap.configRepoName}\\common\\config\\shared.properties";
+              if("${plMap.component}" == "batch-programs"){
+                  plMap.appPort        = plMap.commonProperties.PROGRAMS_APP_PORT;
+                  println "app port of reports ${plMap.appPort}"
+                }else if("${plMap.component}" == "batch-reports"){
+                  plMap.appPort        = plMap.commonProperties.REPORTS_APP_PORT;
+                  println "app port of reports ${plMap.appPort}"
+                }else if("${plMap.component}" == "batch-daemons"){
+                  plMap.appPort        = plMap.commonProperties.PROGRAMS_APP_PORT;
+                  println "app port of daemons ${plMap.appPort}"
+                }else if("${plMap.component}" == "file-service"){
+	 	              plMap.appPort          = plMap.commonProperties.FILE_APP_PORT;
+		        }else if("${plMap.component}" == "consumer-services"){
+                  plMap.appPort        = plMap.commonProperties.CONSUMER_APP_PORT;
+                }
+                println plMap.commonProperties;
+                println "Port Number: ${plMap.appPort}"
+			//"${plMap.configRepoName}\\dev\\${plMap.profile}\\${plMap.componentname}\\config\\branch.properties";
+			//plMap.pipelineProperties = readProperties file: 
+			"${plMap.configRepoName}\\dev\\${plMap.profile}\\${plMap.component}\\config\\pipeline.properties";
+			println plMap.branchProperties;
+			println plMap.pipelineProperties;
+            plMap.branchname= "${BRANCH_NAME}"
+            plMap.profile= "${PROFILE}"
+            plMap.componentname= "${COMPONENT}"
+            branchMap.branch= "${BRANCH_NAME}".split("/");
+            plMap.releaseVersion  = "${branchMap.branch[1]}"
+            println("branchMap::${branchMap.branch}")
+            println("release::${branchMap.branch[0]}")
+            println("releaseversion::${branchMap.branch[1]}")
+            println("Component:${plMap.componentname}")
+            println("Profile:${plMap.profilename}")
+            //plMap.releaseVersion  =  "${plMap.branchProperties.MAJOR_VERSION}.${plMap.branchProperties.MINOR_VERSION}.${plMap.branchProperties.PATCH_VERSION}";
+            plMap.releaseBuildNo  =  "${plMap.releaseVersion}.${currentBuild.number}"
+			//plMap.branchProperties.BRANCH_NAME  =  "${plMap.branchProperties.BRANCH_NAME_PREFIX}${plMap.releaseVersion}";
+			plMap.repoBranchName = plMap.branchname;
+            //to select desire count of task definition for ECS farget to run the no.of containers
+            plMap.desiredCount = "${DESIRED_COUNT}"
+            println("plMap.desiredCount::${DESIRED_COUNT}")
+
+            //plMap.repoBranchName = plMap.branchProperties.BRANCH_NAME;
+            //Email initialization starts here
+            plMap.commonProperties = readProperties file: 
+		   	plMap.emailToList    =  "${plMap.configRepoName}\\common\\config\\shared.properties";
+            if("${plMap.profilename}" == "imm01d"){
+                plMap.emailToList = plMap.commonproperties.imm01d_default_notifiers;
+                println "plMap.emailToList"
+            }else if("${plMap.profilename}" == "imm02d"){
+                plMap.emailToList = plMap.commonproperties.imm02d_default_notifiers;
+                println "plMap.emailToList"
+            }
+            //Email initialization ends here			
+            plMap.repoURL         =   plMap.commonProperties.REPO_URL;
+            if("${plMap.componentname}" == "batch-programs"){
+                plMap.repoURL = plMap.commonproperties.batch-programs_REPO-URL;
+                println "plMap.repoURL"
+            }else if("${plMap.componentname}" == "batch-reports"){
+                plMap.repoURL = plMap.commonproperties.batch-reports_REPO-URL;
+                println "plMap.repoURL"
+			plMap.repoName        =   getRepoNameFromURL(plMap.repoURL);
+			currentBuild.displayName = "#${plMap.releaseVersion}.${currentBuild.displayName.replace("#","")}";
+            //plMap.codeAnalysisStageExists = plMap.pipelineProperties.CODE_ANALYSIS_STAGE.trim();
+              plMap.appPort        = plMap.pipelineProperties.APP_PORT;
+            //plMap.sshUserName    = plMap.pipelineProperties.SSH_USER_NAME;
+            //plMap.sshPassword    = plMap.pipelineProperties.SSH_PASSWORD;
+            //plMap.profileName    = plMap.pipelineProperties.PROFILE_NAME;
+            //credentials id to upload artifactory into repository
+            plMap.artifactType  =  plMap.pipelineProperties.ARTIFACT_TYPE.trim().toLowerCase();
+            plMap.artifactoryregistry = plMap.commonProperties.ARTIFACTORY_REGISTRY;
+			manager.addShortText("Triggered by : ${plMap.userInfo}");
+			manager.addShortText("branch : ${plMap.repoBranchName}");
+			sh "git clone -b ${plMap.repoBranchName} --single-branch ssh://git@bitbucket.es.ad.adp.com:7999/imms/${plMap.repoName}.git";
+			plMap.stagesStatusMap.put(plMap.CHECKOUT_STAGE,plMap.SUCCESS);			  
+		} 
+
+        //Build the cloned code and generate the build package
+        //This stage integrate the code,  build the code and generate docker image and push image to registry
+		stage(plMap.BUILD_STAGE){
+			plMap.stagesStatusMap.put(plMap.BUILD_STAGE,plMap.FAILURE);
+            if("${plMap.componentname}" == "consumer-services"){
+                env.MVN_OPTIONS="-Dmaven.test.skip=true"
+            }
+            else if("${plMap.componentname}" == "")
+			dir(plMap.repoName){  
+                sh "mvn install ${env.MVN_OPTIONS}";
+				sh "git status -uall";
+                sh "docker build -t imm-${plMap.componentname}:${plMap.releaseBuildNo} ."
+                sh "docker login -u imm_cicddev -p ReleaseEngineering@123 https://${plMap.artifactoryregistry}/";
+                sh "docker tag  imm-${plMap.componentname}:${plMap.releaseBuildNo} ${plMap.artifactoryregistry}/imms/imm-${plMap.componentname}:${plMap.releaseBuildNo}"
+                sh "docker push ${plMap.artifactoryregistry}/imms/imm-${plMap.componentname}:${plMap.releaseBuildNo}";
+                sh "docker image rm imm-${c}:${plMap.releaseBuildNo}";
+                   //if("${plMap.componentname}" == "batch-programs" || "${plMap.componentname}" == "batch-reports" || "${plMap.componentname}" == "consumer-services"){
+                  //input "You want to proceed????"
+		    }
+			plMap.stagesStatusMap.put(plMap.BUILD_STAGE,plMap.SUCCESS);
+        }
+
+/*
+        stage(plMap.CODE_ANALYSIS_STAGE){
+            if(plMap.codeAnalysisStageExists=="true"){
+			    plMap.stagesStatusMap.put(plMap.CODE_ANALYSIS_STAGE,plMap.FAILURE);
+			    dir(plMap.repoName){  
+				    sh "mvn sonar:sonar -Dsonar.host.url=http://51.19.132.203:9000/sonar";
+			    }
+			    plMap.stagesStatusMap.put(plMap.CODE_ANALYSIS_STAGE,plMap.SUCCESS);
+            }
+	}
+*/
+
+                dir("${plMap.configRepoName}\\common\\terraform"){
+                    plMap.ecs = readJSON file: "aws_ecs_config.json";
+                    plMap.container = plMap.ecs.container_map["${plMap.profileName}"]["${plMap.componentname}"]."container_name";
+                    plMap.dspring_dserver = plMap.ecs.container_map["${plMap.profileName}"]["${plMap.componentname}"]."java_tool_options";
+                    plMap.user_value = plMap.ecs.container_map["${plMap.profileName}"]["${plMap.componentname}"]."user_value";
+                    println "${plMap.dspring_dserver}"
+                    println "${plMap.ecs}"
+                    println "${plMap.container}" 
+                    println "${plMap.user_value}"                 
+                 }plMap.ecs = readJSON file: "aws_ecs_config.json";
+
+        //approval process to approve the deployment
+        stage(plMap.APPROVE_STAGE){
+	        plMap.stagesStatusMap.put(plMap.APPROVE_STAGE,plMap.FAILURE);
+	        println "Job will get cancelled/aborted automatically, if there is no response from approver within 120 seconds"
+                timeout(time: 120, unit: 'SECONDS'){
+                    def userInput = input id: 'userInput',
+                        message: "Lets promote - ${plMap.componentname}-${plMap.profilename}-${plMap.releaseVersion}", 
+                        submitterParameter: 'submitter',
+                        submitter: ' '           
+                   //echo ("submitted by: ${userInput}")
+                   //plMap.submitted = "${userInput}" 
+                   //println "${plMap.submitted}"
+                         plMap.stagesStatusMap.put(plMap.APPROVE_STAGE,plMap.SUCCESS);
+                    }
+            }
+
+
+        //deploy the built image to the ECS fargate with terraform scripts
+        stage(plMap.ECS_DEPLOYMENT){
+			plMap.stagesStatusMap.put(plMap.ECS_DEPLOYMENT,plMap.FAILURE);
+            plMap.imageIdURL = "docker.artifactory.us.caas.oneadp.com/imms/imm-${plMap.componentname}:${plMap.releaseBuildNo}";
+
+            //configuring container information
+			dir("${plMap.configRepoName}\\common\\terraform"){
+                def containerDefJSON = readFile file: "containers-def.json"
+                containerDefJSON = containerDefJSON.replaceAll("DOCKER_IMAGE_URL", plMap.imageIdURL).
+                replaceAll("COMPONENT_NAME",plMap.componentname).
+                replaceAll("ENV_NAME", env.ENV_NAME).                
+                replaceAll("PROFILE_NAME", plMap.profileName). 
+                replaceAll("\"PORT_NO\"",plMap.appPort);
+                writeFile file: "containers-def.json", text: containerDefJSON;
+                // start of making provider backend dynamic
+                def tfProvBackendFileContent = readFile file: "prov_backend.tf"
+                tfProvBackendFileContent = tfProvBackendFileContent
+                .replaceAll("TF_STATE_FILE","imm-${plMap.componentname}-${env.ENV_NAME}-${plMap.profileName}/terraform-state.tfstate");
+                writeFile file:  "prov_backend.tf", text: tfProvBackendFileContent;
+                sh "cat containers-def.json";
+
+                //overriding service task definition desire count from the build parameter
+                def mainTf = readFile file: "main.tf"
+                mainTf = mainTf.replaceAll("TASK_DESIRED_COUNT", plMap.desiredCount);
+                writeFile file: "main.tf", text: mainTf;
+                sh "cat main.tf";
+
+                //println containerDefJSON;
+               sh "sh ../utility-scripts/shell-scripts/role-based-credentials.sh";
+               sh "terraform init"
+               sh "terraform plan -var-file=${plMap.componentname}.tfvars ";
+               sh "terraform apply -auto-approve -var-file=${plMap.componentname}.tfvars ";
+            }  
+            	plMap.stagesStatusMap.put(plMap.ECS_DEPLOYMENT,plMap.SUCCESS);
+		} 
+
+        stage(plMap.MERGE_TO_DEVELOP){
+			    plMap.stagesStatusMap.put(plMap.MERGE_TO_DEVELOP,plMap.FAILURE);
+        try{
+			    dir(plMap.repoName){  
+                    sh "git fetch origin develop:develop";
+				    sh "git checkout develop";
+                    //sh "git merge ${plMap.repoBranchName}";
+                    //sh "git push origin develop";
+			    }
+                plMap.stagesStatusMap.put(plMap.MERGE_TO_DEVELOP,plMap.SUCCESS);
+            }
+        catch(ex){
+                println "********** Merge to Develop FAILED ************************";
+            }
+
+		}
+    }
+    catch(ex){
+        println "Pipeline failed, please check the logs below";
+      	println "Ongoing Job Build Status :${currentBuild.result}";
+      	println "Ongoing Job Build Status :${currentBuild.currentResult}";
+        //to set the build status in case of plMap.FAILURE
+      if(currentBuild.currentResult=="UNSTABLE"){
+        currentBuild.result = plMap.UNSTABLE;
+        throw ex;
+      }else{
+      	currentBuild.result = plMap.FAILURE;
+        throw ex;
+      }
+    }
+	finally{
+	   stage(plMap.EMAIL_NOTIFICATION_STAGE){
+	    println "Sending email to : ${plMap.emailToList}";
+		sendEmailNotification(plMap);
+	   }
+	}
+}
+
+def sendEmailNotification(plMap){
+	emailext body: getEmailBody(plMap), 
+	recipientProviders: [developers()],
+	subject: "CICD ${plMap.componentname}-${env.PROFILE} Deployment ${currentBuild.displayName}-${currentBuild.currentResult}", 
+	 to: plMap.emailToList,
+	 attachLog: true;
+}
+
+def getEmailBody(plMap){
+            for(def stage: plMap.stagesStatusMap.keySet()){
+            println "${stage} : ${plMap.stagesStatusMap.get(stage)}";
+            }
+   def emailBody =  """
+<html>
+<head>
+<style>
+body{
+    background-color:#fdfcf6 !important;
+    color: #ebebeb !important;
+}
+table {
+  width:100%;
+}
+table td {
+    border: 0.3px solid #ebebeb;
+    border-collapse: collapse;
+    background-color: #897cb3;
+    color: #ffffff;
+    padding: 8px;
+    text-align: left;
+}
+
+
+table th {
+    border: 0.2px solid #ebebeb;
+    border-collapse: collapse;
+    background-color: #efdfd0;
+    color: #121c4e;
+    padding: 15px;
+    text-align: left;
+}
+
+h1, h2, h3, h4, h5, h6{
+    background-color:gray;
+    color: #ffffff;
+}
+a:link, a:visited {
+  background-color: #f44336;
+  color: white;
+  padding: 14px 25px;
+  text-align: center;
+  text-decoration: none;
+  display: inline-block;
+}
+
+a:hover, a:active {
+  background-color: #3ebede;
+}
+</style>
+</head>
+<body>
+<div>
+
+<div style="float:left !important;width:50% !important">
+<h3>Job Build Status : ${currentBuild.currentResult}</h3>
+<h3>Triggered by : ${userInfo} </h3>
+<h4>Execution time : ${currentBuild.durationString.replace("and counting","")} </h4>
+<h4>Branch : ${plMap.repoBranchName}</h4>
+<a href="${currentBuild.absoluteUrl}"><h5>Jenkins Build URL</h5></a>
+<a href="${env.SONAR_HOST_URL}:9000/sonar/dashboard?id=com.adp.imms:imms-${plMap.componentname}"><h5>Code Analysis URL</h5></a>
+</div>
+<div >
+<table>
+<tr><th>Stage</th><th>Result</th></tr>""";
+
+for(def stage: plMap.stagesStatusMap.keySet()){
+    emailBody+= """<tr><td>${stage}</td><td>${plMap.stagesStatusMap.get(stage)}</td></tr>""";
+}
+emailBody+= """
+</table>
+</div>
+
+
+</div>
+</body>
+</html>
+""";
+return emailBody;
+}
+
+
+def getBuildUserInfo(){
+    // plMap.userInfo="";
+    emailId ="";
+    userId ="";
+    try{
+    wrap([$class: 'BuildUser']) {
+        emailId = BUILD_USER_EMAIL;
+        userId = BUILD_USER_ID;
+        if(null==emailId || null==userId ||  emailId.trim().length()==0)
+        emailId = "AutoTrigger";
+        BUILD_USER_EMAIL = emailId;
+    }
+    }
+    catch(ex){
+        userInfo = "AutoTrigger";
+        return userInfo;
+    }
+  userInfo = "${userId} - ${emailId}";
+  return userInfo;
+}
