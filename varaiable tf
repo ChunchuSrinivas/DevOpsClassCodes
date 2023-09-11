@@ -1,0 +1,66 @@
+variable aws_region {
+  type        = string
+  default     = "ca-central-1"
+}
+variable aws_profile {
+  type        = string
+  default     = "saml"
+  description = "AWS profile for required Credentials and Access to AWS services"
+}
+variable app_comp_name {
+  type        = string
+  default     = "imm-batch-programs"
+  description = "description"
+}
+variable app_env_name {
+  type        = string
+  default     = "dev"
+  description = "description"
+}
+variable app_profile_with_imm{
+  type = string
+  default = ""
+  description = "description"
+}
+variable app_grp_name {
+  type        = string
+  default     = "imm"
+  description = "group name"
+}
+variable app_profile_without_imm {
+  type        = string
+  default     = "01d"
+  description = "description"
+}
+variable host {
+type = string
+  default =  "dit.imm.oneadp.com"
+  description = "description"
+}
+variable image_id {
+  type        = string
+  default     = ""
+  description = "This image id will have absolute path of docker image built from App Build"
+}
+variable memory {
+  type = string
+  default = "1024"
+}
+variable cpu {
+  type = string
+  default = "512"
+}
+variable port_no {
+  type = string
+  default = ""
+}
+variable desired_count {
+}
+variable container_insights_flag {
+  type = string
+  default = "disabled"
+}
+variable app_context_path {
+  type = string
+  default = "programs"
+}
