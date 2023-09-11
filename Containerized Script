@@ -1,0 +1,203 @@
+node("aws-devops-linux"){
+    def plMap = [:];
+    dir("/tmp/jenkins_ws"){
+    try{
+        executeTerraform(plMap);
+    }
+    catch(ex){
+        throw ex;
+    }
+    finally{
+        deleteDir();
+    }
+    }
+}
+
+def getRepoNameFromURL(def gitURL){
+    return gitURL.replace(".git","").split("/")[-1];
+}
+
+def init(plMap){
+    plMap.userInfo =	getBuildUserInfo();
+    plMap.ECS_DEPLOYMENT = "ECS Deployment";
+    plMap.EMAIL_NOTIFICATION_STAGE = "EmailNotification";
+    plMap.NOT_STARTED = "Not Started";
+    plMap.SUCCESS = "SUCCESS";
+    plMap.FAILURE = "FAILURE";
+  	plMap.UNSTABLE = "ABORTED";
+    plMap.stagesStatusMap = [:];
+	plMap.stagesStatusMap.put(plMap.ECS_DEPLOYMENT,plMap.NOT_STARTED);
+
+    println "Initializing all folder properties";
+	withFolderProperties{
+		env.CONFIG_REPO_URL =  env.CONFIG_REPO_URL;
+		env.GIT_CRED_ID = env.GIT_CRED_ID;
+        env.COMPONENT_NAME = env.COMPONENT_NAME;
+	}
+}
+
+def executeTerraform(plMap){
+        init(plMap);
+        plMap.configRepoURL =  env.CONFIG_REPO_URL;
+        plMap.configRepoName = getRepoNameFromURL(plMap.configRepoURL);
+		println "configuration from Config Repo: ${plMap.configRepoName}";
+    
+        try{
+        stage(plMap.ECS_DEPLOYMENT){
+			plMap.stagesStatusMap.put(plMap.ECS_DEPLOYMENT,plMap.FAILURE);
+            println "Curent directory : ";
+            sh "pwd";
+			sh "git clone -b master --single-branch ssh://git@bitbucket.es.ad.adp.com:7999/imms/${plMap.configRepoName}.git";
+			sh "ls -ltr";
+            plMap.releaseVersion  =   "1.0.0";
+            plMap.releaseBuildNo = "${plMap.releaseVersion}.${currentBuild.number}"
+            plMap.imageIdURL = "${IMAGE_ID_URL}";
+
+            //Email initialization starts here
+			plMap.emailToList    =  "omkar.sirra@adp.com";		
+			dir("${plMap.configRepoName}\\common\\terraform"){
+  
+                def containerDefJSON = readFile file: "containers-def.json"
+                containerDefJSON = containerDefJSON.replaceAll("DOCKER_IMAGE_URL", plMap.imageIdURL);
+                writeFile file: "containers-def.json", text: containerDefJSON
+
+                //println containerDefJSON;
+
+               sh "terraform init";
+               sh "terraform plan";
+               sh "terraform apply -auto-approve";
+            }  
+            	plMap.stagesStatusMap.put(plMap.ECS_DEPLOYMENT,plMap.SUCCESS);
+		} 
+			
+		}
+    catch(ex){
+        println "Pipeline failed, please check the logs below";
+      	println "Ongoing Job Build Status :${currentBuild.result}";
+      	println "Ongoing Job Build Status :${currentBuild.currentResult}";
+        //to set the build status in case of plMap.FAILURE
+      if(currentBuild.currentResult=="UNSTABLE"){
+        currentBuild.result = plMap.UNSTABLE;
+        throw ex;
+      }else{
+      	currentBuild.result = plMap.FAILURE;
+        throw ex;
+      }
+    }
+	finally{
+	   stage(plMap.EMAIL_NOTIFICATION_STAGE){
+	    println "Sending email to : ${plMap.emailToList}";
+		sendEmailNotification(plMap);
+	   }
+	}
+}
+
+def sendEmailNotification(plMap){
+	emailext body: getEmailBody(plMap), 
+	recipientProviders: [developers()],
+	 subject: "DevOps ${currentBuild.fullProjectName} #${currentBuild.number} Build  Status : ${currentBuild.currentResult}", 
+	 to: "omkar.sirra@adp.com;",
+	 attachLog: true;
+}
+
+def getEmailBody(plMap){
+            for(def stage: plMap.stagesStatusMap.keySet()){
+            println "${stage} : ${plMap.stagesStatusMap.get(stage)}";
+            }
+   def emailBody =  """
+<html>
+<head>
+<style>
+body{
+    background-color:#fdfcf6 !important;
+    color: #ebebeb !important;
+}
+table {
+  width:100%;
+}
+table td {
+    border: 0.3px solid #ebebeb;
+    border-collapse: collapse;
+    background-color: #897cb3;
+    color: #ffffff;
+    padding: 8px;
+    text-align: left;
+}
+
+
+table th {
+    border: 0.2px solid #ebebeb;
+    border-collapse: collapse;
+    background-color: #efdfd0;
+    color: #121c4e;
+    padding: 15px;
+    text-align: left;
+}
+
+h1, h2, h3, h4, h5, h6{
+    background-color:gray;
+    color: #ffffff;
+}
+a:link, a:visited {
+  background-color: #f44336;
+  color: white;
+  padding: 14px 25px;
+  text-align: center;
+  text-decoration: none;
+  display: inline-block;
+}
+
+a:hover, a:active {
+  background-color: #3ebede;
+}
+</style>
+</head>
+<body>
+<div>
+
+<div style="float:left !important;width:50% !important">
+<h3>Job Build Status : ${currentBuild.currentResult}</h3>
+<h3>Triggered by : ${userInfo} </h3>
+<h4>Execution time : ${currentBuild.durationString.replace("and counting","")} </h4>
+<a href="${currentBuild.absoluteUrl}"><h5>Jenkins Build URL</h5></a>
+</div>
+<div >
+<table>
+<tr><th>Stage</th><th>Result</th></tr>""";
+
+for(def stage: plMap.stagesStatusMap.keySet()){
+    emailBody+= """<tr><td>${stage}</td><td>${plMap.stagesStatusMap.get(stage)}</td></tr>""";
+}
+emailBody+= """
+</table>
+</div>
+
+
+</div>
+</body>
+</html>
+""";
+return emailBody;
+}
+
+
+def getBuildUserInfo(){
+    // plMap.userInfo="";
+    emailId ="";
+    userId ="";
+    try{
+    wrap([$class: 'BuildUser']) {
+        emailId = BUILD_USER_EMAIL;
+        userId = BUILD_USER_ID;
+        if(null==emailId || null==userId ||  emailId.trim().length()==0)
+        emailId = "AutoTrigger";
+        BUILD_USER_EMAIL = emailId;
+    }
+    }
+    catch(ex){
+        userInfo = "AutoTrigger";
+        return userInfo;
+    }
+  userInfo = "${userId} - ${emailId}";
+  return userInfo;
+}
