@@ -1,0 +1,26 @@
+{
+    "container_map":{     
+       "imm01d":{
+            "batch-programs":{
+             "cluster_name"    : "imm-batch-programs-imm01d-cluster",
+             "service_name"    : "imm-batch-programs-imm01d-service",
+             "container_name"  : "imm-batch-programs-imm01d-container",
+             "task_family"     : "imm-batch-programs-imm01d-task",
+             "target_group"    : "imm-batch-programs-imm01d-tg",
+             "java_tool_options" : "-Dspring.profiles.active=imm01d -Dvault.userpass.password=I8DpWghmcZXeJBfhU",
+             "listener_rule"   : "arn:aws:elasticloadbalancing:ca-central-1:856768456474:listener/app/imm-dev-lb/157b04ce97c03f77/c454c86d76fd3683",
+             "host"            : "dit.imm.oneadp.com",
+             "sb_nets"         : ["subnet-ea1e7883","subnet-7145fd0a"],
+             "sg_group"        : ["sg-0caa3230dc86b8096"],
+             "vpc_id"          : "vpc-cd3aa8a4",
+             "efs_volume"      : "fs-3bb65ed6",
+             "root_directory"  : "/appefs",
+             "app_user"        : "appefs",
+             "app_user_value"  : "868:1000",
+             "port"            : "8451",
+             "memory"          : "1024",
+             "cpu"             : "512"
+            }
+       }
+    }
+}
