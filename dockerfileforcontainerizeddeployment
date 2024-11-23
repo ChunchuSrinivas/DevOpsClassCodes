@@ -1,0 +1,14 @@
+# Use an OpenJDK base image to run the WAR file
+FROM openjdk:17-jdk-slim
+
+# Set the working directory inside the container
+WORKDIR /app
+
+# Copy the pre-generated WAR file into the container
+COPY path/to/your.war /app/app.war
+
+# Expose the port the application will run on (default for Java web applications is 8080)
+EXPOSE <port>
+
+# Run the WAR file using the 'java -jar' command
+CMD ["java", "-jar", "/app/app.war"]
