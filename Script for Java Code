@@ -1,6 +1,6 @@
 /****
 Script to checkout the application repo, Build , push artifacts to artifactory and deploy on deployment server and sent notifications
-Author: Shaik kalesha
+Author: ####
 Stages: CHECKOUT_STAGE: checkout the cicd code base and initialize all the required parameters as well as It will chekcout the UI repo
         BUILD_STAGE: Build the code from the branch and generate the build package
         UPLOAD_ARTIFACT_TO_ARTIFACTORY: Upload the artifacts from the slave node to Jfrog artifactory
